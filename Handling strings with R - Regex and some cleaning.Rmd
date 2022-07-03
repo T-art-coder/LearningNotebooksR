@@ -1,0 +1,607 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Handling strings with R
+Source
+https://www.gastonsanchez.com/r4strings/cleaning.html
+
+```{r}
+install.packages('stringr')
+
+install.packages('tidyverse')
+
+install.packages("htmlwidgets")
+```
+
+```{r}
+library(stringr)
+library(tidyverse)
+```
+12.1 Defining character sets
+```{r}
+pns <- c('pan', 'pen', 'pin', 'pon', 'pun')
+
+str_view(pns, "p[aeiou]n")
+
+str_view(pns, "p.n")
+```
+
+```{r}
+basic <- c('1', 'a', 'A', '&', '-', '^')
+
+str_view(basic, '[0-9]')
+```
+
+```{r}
+triplets <- c('123', 'abc', 'ABC', ':-)')
+
+str_view(triplets, '[0-9][0-9][0-9]')
+```
+
+The caret "^" is one of those metacharacters that have more than one meaning depending on where it appears in a pattern. If you use a caret in the first position inside a character set, e.g. [^aeiou], it means negation. In other words, the caret in [^aeiou] means “not any one of lower case vowels.”
+
+```{r}
+basic <- c('1', 'a', 'A', '&', '-', '^')
+```
+
+To match those elements that are NOT upper case letters, you define a negative character range "[^A-Z]":
+
+Match everything except the capital letters
+```{r}
+str_view(basic, '[^A-Z]')
+```
+
+```{r}
+str_view(basic, '[A-Z^]')
+```
+13. Anchors formatting
+```{r}
+university <- c(
+  "University of Southern California", 
+  "California State University", 
+  "Stanford University", 
+  "University of California, Berkeley")
+
+university
+```
+starts with university
+```{r}
+str_detect(university, "^University")
+```
+ends with university
+```{r}
+str_detect(university, "University$")
+```
+
+```{r}
+university <- c(
+  "University of Southern California
+  \nCalifornia State University
+  \nStanford University
+  \nUniversity of California, Berkeley\n")
+
+cat(university)
+```
+
+```{r}
+str_extract_all(university, regex("[A-z ]*University$", multiline = TRUE))
+```
+Quantifiers
+
+In the following example, let us try to extract all those names that contain more than 4 characters and less than 7 characters.
+```{r}
+student_names <- c("Lee", "Carol", "Sameer", "Luca", "Rajan", "George Jr.")
+```
+
+```{r}
+str_extract(student_names, "^[A-z]{5,7}$" )
+```
+In the last example, if we want to extract names that contain e or u we could follow this simple implementation . Points to note here:
+
+Character set [eu] could appear 1 or more times so we use quantifier +.
+
+.* matches 0 or any number of characters where . is a wildcard dot and * represents the quantifier 0 or many
+
+Pattern .*[eu]+.* looks for 1 or more numbers of [eu] that can be preceeded/followed by any number of other characters.
+```{r}
+str_detect(student_names, regex("[eu]+"))
+```
+Consider an example where we would like to extract only strings with two names separated by a whitespace. For illustrative purpose, the strings end with a whitespace.
+```{r}
+student_names <- c(
+  "Lee Zhang ", 
+  "Carol Roberts ", 
+  "Sameer ", 
+  "Luca ", 
+  "Rajan ", 
+  "George Smith Smith ")
+```
+
+```{r}
+str_extract(student_names, regex("([A-z]+[ ]){3}"))
+```
+Data Cleaning
+```{r}
+install.packages('rvest')
+library(rvest)
+```
+
+```{r}
+wiki_jump <- 'https://en.wikipedia.org/wiki/Men%27s_long_jump_world_record_progression'
+
+long_jump <- read_html(wiki_jump)
+tbl <- html_table(html_node(long_jump, 'table'))
+```
+
+```{r}
+str(tbl, vec.len = 1)
+```
+
+```{r}
+tbl$Mark[1]
+```
+
+```{r}
+substr(tbl$Mark[1], start = 1, stop = 4)
+```
+
+```{r}
+meters <- as.numeric(substr(tbl$Mark, start = 1, stop = 4))
+meters
+```
+Let's try to do this using a pattern
+
+[0-9]\\.[0-9][0-9]
+```{r}
+str_detect(tbl$Mark[1], pattern = "[0-9]\\.[0-9][0-9]")
+```
+
+```{r}
+str_extract(tbl$Mark, pattern = "[0-9]\\.[0-9][0-9]")
+```
+Extract a country
+```{r}
+tbl$Athlete[1]
+```
+
+```{r}
+substr(tbl$Athlete, nchar(tbl$Athlete)-4, nchar(tbl$Athlete))
+```
+
+```{r}
+country <- substr(tbl$Athlete, nchar(tbl$Athlete)-3, nchar(tbl$Athlete)-1)
+country
+```
+Cleaning Dates
+```{r}
+tbl$Date[1:5]
+```
+
+```{r}
+date1 <- tbl$Date[1]
+date1
+```
+
+
+```{r}
+str_match(date1, pattern = "\\[1\\]")
+```
+
+```{r}
+str_replace(date1, pattern = "\\[1\\]", replacement = '')
+```
+
+```{r}
+dates <- str_replace(tbl$Date, pattern = "\\[1\\]", replacement = "")
+dates <- str_replace(dates, pattern = "\\[[3-5]\\]", replacement = "")
+dates
+```
+
+
+```{r}
+str_extract(dates, pattern = "[A-Z][a-z][a-z][a-z]")
+```
+
+
+```{r}
+month_names <- str_extract(dates, pattern = "[A-Z][a-z]+")
+month_names
+```
+
+```{r}
+str_extract(dates, pattern = "[0-9]+")
+```
+for a year
+```{r}
+str_sub(dates, start = -4)
+
+str_extract(dates, pattern = '[0-9][0-9][0-9][0-9]')
+```
+
+```{r}
+str_extract(dates, pattern = "[0-9]+$")
+```
+
+```{r}
+str_extract(tbl$Athlete, pattern = "[A-Z][a-z]+")
+```
+The pattern "[A-Z][a-z]+" fails to match the name of the fourth athlete DeHart Hubbard (USA). One way to match an optional upper case in the third position is with the following pattern: "[A-Z][a-z][A-Z]?[a-z]
+
+
+```{r}
+str_extract(tbl$Athlete, pattern = "[A-Z][a-z][A-Z]?[a-z]+")
+```
+An alternative option is to use the word character class \\w repeated one or more times: "\\w+"
+```{r}
+str_extract(tbl$Athlete, pattern = "\\w+")
+```
+In reality, we want both the apostrophe and the second upper case letters to be optional, so we need to add quantifiers "?" to both of them:
+```{r}
+str_extract(tbl$Athlete, pattern = "[A-Z][a-z][A-Z]?[a-z]+ [A-Z]'?[A-Z]?[a-z]+")
+```
+. So we also need to include upper case letters in the character set: "[a-zA-Z\\-]"
+```{r}
+str_extract(tbl$Athlete, pattern = "[A-Z][a-z][A-Z]?[a-z]+ [A-Z]('[A-Z])?[a-zA-Z\\-]+")
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
