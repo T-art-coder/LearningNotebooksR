@@ -1,0 +1,587 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Three general-purpose lexicons are
+
+AFINN from Finn Årup Nielsen,
+bing from Bing Liu and collaborators, and
+nrc from Saif Mohammad and Peter Turney.
+All three of these lexicons are based on unigrams, i.e., single words. These lexicons contain many English words and the words are assigned scores for positive/negative sentiment, and also possibly emotions like joy, anger, sadness, and so forth. 
+
+- The nrc lexicon categorizes words in a binary fashion (“yes”/“no”) into categories of positive, negative, anger, anticipation, disgust, fear, joy, sadness, surprise, and trust. 
+- The bing lexicon categorizes words in a binary fashion into positive and negative categories. 
+- The AFINN lexicon assigns words with a score that runs between -5 and 5, with negative scores indicating negative sentiment and positive scores indicating positive sentiment.
+```{r}
+library(tidyverse)
+library(tidytext)
+library(stringr)
+library(gutenbergr)
+#install.packages("textdata")
+```
+
+```{r}
+get_sentiments("afinn")
+
+get_sentiments("bing")
+
+get_sentiments("nrc")
+```
+### 2.2 Sentiment analysis with inner join
+```{r}
+library(janeaustenr)
+```
+
+What are the most common joy words in Emma?
+```{r}
+ tidy_books <-austen_books() %>%
+  group_by(book) %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, 
+                                regex("^chapter [\\divxlc]", 
+                                      ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+tidy_books
+```
+
+```{r}
+nrc_joy <- get_sentiments("nrc") %>%
+  filter(sentiment == "joy")
+
+nrc_joy
+```
+
+```{r}
+tidy_books %>% file(book == "Emma") %>%
+  inner_join(nrc_joy) %>%
+  count(word, sort = TRUE)
+```
+
+```{r}
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative) 
+
+jane_austen_sentiment
+```
+
+```{r}
+library(scales)
+```
+
+
+```{r fig.height=10, fig.width=10}
+ggplot(jane_austen_sentiment, aes(x = index, y = sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") +
+  theme_minimal(base_family = "Roboto Condensed", base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        # Bold, bigger title
+        plot.title = element_text(face = "bold", size = rel(1.7)),
+        # Plain, slightly bigger subtitle that is grey
+        plot.subtitle = element_text(face = "plain", size = rel(1.3), color = "grey70"),
+        # Italic, smaller, grey caption that is left-aligned
+        plot.caption = element_text(face = "italic", size = rel(0.7), 
+                                    color = "grey70", hjust = 0),
+        # Bold legend titles
+        legend.title = element_text(face = "bold"),
+        # Bold, slightly larger facet titles that are left-aligned for the sake of repetition
+        strip.text = element_text(face = "bold", size = rel(1.1), hjust = 0),
+        # Bold axis titles
+        axis.title = element_text(face = "bold"),
+        # Add some space above the x-axis title and make it left-aligned
+        axis.title.x = element_text(margin = margin(t = 10), hjust = 0),
+        # Add some space to the right of the y-axis title and make it top-aligned
+        axis.title.y = element_text(margin = margin(r = 10), hjust = 1),
+        strip.background = element_rect(fill = "grey90", color = NA),
+        # Add a thin grey border around all the plots to tie in the facet titles
+        panel.border = element_rect(color = "grey90", fill = NA)) +
+  scale_fill_brewer(palette = "Spectral") +
+  labs(title = "Figure 2.2: Sentiment through the narratives of Jane Austen’s novels")
+  #scale_fill_viridis_d()
+  
+```
+
+```{r}
+my_pretty_theme <- theme_minimal(base_family = "Roboto Condensed", base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        # Bold, bigger title
+        plot.title = element_text(face = "bold", size = rel(1.7)),
+        # Plain, slightly bigger subtitle that is grey
+        plot.subtitle = element_text(face = "plain", size = rel(1.3), color = "grey70"),
+        # Italic, smaller, grey caption that is left-aligned
+        plot.caption = element_text(face = "italic", size = rel(0.7), 
+                                    color = "grey70", hjust = 0),
+        # Bold legend titles
+        legend.title = element_text(face = "bold"),
+        # Bold, slightly larger facet titles that are left-aligned for the sake of repetition
+        strip.text = element_text(face = "bold", size = rel(1.1), hjust = 0),
+        # Bold axis titles
+        axis.title = element_text(face = "bold"),
+        # Add some space above the x-axis title and make it left-aligned
+        axis.title.x = element_text(margin = margin(t = 10), hjust = 0),
+        # Add some space to the right of the y-axis title and make it top-aligned
+        axis.title.y = element_text(margin = margin(r = 10), hjust = 1),
+        # Add a light grey background to the facet titles, with no borders
+        strip.background = element_rect(fill = "grey90", color = NA),
+        # Add a thin grey border around all the plots to tie in the facet titles
+        panel.border = element_rect(color = "grey90", fill = NA))
+```
+
+
+### 2.3 Comparing the three sentiment dictionaries
+```{r}
+pride_prejudice <- tidy_books %>% 
+  filter(book == "Pride & Prejudice")
+```
+
+```{r}
+afinn <- pride_prejudice %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(index = linenumber %/% 80) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN")
+
+bing_and_nrc <- bind_rows(
+  pride_prejudice %>% 
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al."),
+  pride_prejudice %>% 
+    inner_join(get_sentiments("nrc") %>% 
+                 filter(sentiment %in% c("positive", 
+                                         "negative"))
+    ) %>%
+    mutate(method = "NRC")) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+```
+
+```{r fig.height=10, fig.width=10}
+three_sentiments <- bind_rows(afinn, 
+          bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE, alpha = 0.8) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  labs(title = "Figure 2.3: Comparing three sentiment lexicons using Pride and Prejudice")+
+  my_pretty_theme
+
+three_sentiments
+```
+
+```{r}
+png("three_sentiments.png", width=600, height=600)
+print(three_sentiments)
+dev.off()
+```
+
+
+
+Why is, for example, the result for the NRC lexicon biased so high in sentiment compared to the Bing et al. result? Let’s look briefly at how many positive and negative words are in these lexicons.
+```{r}
+get_sentiments("nrc") %>% 
+  filter(sentiment %in% c("positive", "negative")) %>% 
+  count(sentiment)
+```
+
+```{r}
+get_sentiments("bing") %>% 
+  count(sentiment)
+```
+### 2.4 Most common positive and negative words
+Let's find word contributions to sentiments
+```{r}
+bing_word_counts <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts
+```
+
+```{r fig.height=6, fig.width=6}
+bing_word_count_p <- bing_word_counts %>% group_by(sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(title = "Figure 2.4: Word Contributions", x = "Contribution to sentiment", y = NULL)+
+  my_pretty_theme
+
+bing_word_count_p
+```
+
+
+```{r}
+png("bing_word_count_p.png", width=600, height=600)
+print(bing_word_count_p)
+dev.off()
+```
+
+
+
+Words that contribute to positive and negative sentiment in Jane Austen's novels
+Figure 2.4: Words that contribute to positive and negative sentiment in Jane Austen’s novels
+
+Figure 2.4 lets us spot an anomaly in the sentiment analysis; the word “miss” is coded as negative but it is used as a title for young, unmarried women in Jane Austen’s works. If it were appropriate for our purposes, we could easily add “miss” to a custom stop-words list using bind_rows(). We could implement that with a strategy such as this.
+
+```{r}
+custom_stop_words <- bind_rows(tibble(word = c("miss"),  
+                                      lexicon = c("custom")), 
+                               stop_words)
+
+custom_stop_words
+```
+
+```{r}
+install.packages("wordcloud")
+
+library(wordcloud)
+```
+
+```{r}
+tidy_books %>%
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+```
+
+```{r}
+install.packages("reshape2")
+library(reshape2)
+```
+
+```{r}
+tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"),
+                   max.words = 100)
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```vv
