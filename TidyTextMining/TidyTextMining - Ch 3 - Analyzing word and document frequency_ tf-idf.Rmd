@@ -1,0 +1,441 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(janeaustenr)
+library(tidytext)
+
+#install.packages("forcats")
+library(forcats)
+```
+
+```{r}
+book_words <- austen_books() %>%
+  unnest_tokens(word, text) %>%
+  count(book, word, sort = TRUE)
+
+book_words
+```
+
+```{r}
+total_words <- book_words %>% 
+  group_by(book) %>% 
+  summarize(total = sum(n))
+
+total_words
+```
+
+```{r}
+book_words <- left_join(book_words, total_words)
+book_words
+```
+
+```{r}
+my_pretty_theme <- theme_minimal(base_family = "Roboto Condensed", base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        # Bold, bigger title
+        plot.title = element_text(face = "bold", size = rel(1.7)),
+        # Plain, slightly bigger subtitle that is grey
+        plot.subtitle = element_text(face = "plain", size = rel(1.3), color = "grey70"),
+        # Italic, smaller, grey caption that is left-aligned
+        plot.caption = element_text(face = "italic", size = rel(0.7), 
+                                    color = "grey70", hjust = 0),
+        # Bold legend titles
+        legend.title = element_text(face = "bold"),
+        # Bold, slightly larger facet titles that are left-aligned for the sake of repetition
+        strip.text = element_text(face = "bold", size = rel(1.1), hjust = 0),
+        # Bold axis titles
+        axis.title = element_text(face = "bold"),
+        # Add some space above the x-axis title and make it left-aligned
+        axis.title.x = element_text(margin = margin(t = 10), hjust = 0),
+        # Add some space to the right of the y-axis title and make it top-aligned
+        axis.title.y = element_text(margin = margin(r = 10), hjust = 1),
+        # Add a light grey background to the facet titles, with no borders
+        strip.background = element_rect(fill = "grey90", color = NA),
+        # Add a thin grey border around all the plots to tie in the facet titles
+        panel.border = element_rect(color = "grey90", fill = NA))
+```
+
+
+```{r fig.height=6, fig.width=6}
+ggplot(book_words, aes(n/total, fill = book)) +
+  geom_histogram(show.legend = FALSE)+
+  xlim(NA, 0.0009)+
+  facet_wrap(~book, ncol = 2, scales = "free_y") +
+  my_pretty_theme
+```
+
+Zipf’s law states that the frequency that a word appears is inversely proportional to its rank.
+```{r}
+freq_by_rank <- book_words %>%
+  group_by(book) %>%
+  mutate(rank = row_number(),
+         'term frequency' = n/total) %>%
+  ungroup()
+
+freq_by_rank
+```
+
+```{r}
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = book)) + 
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  my_pretty_theme
+```
+ Let’s see what the exponent of the power law is for the middle section of the rank range.
+```{r}
+rank_subset <- freq_by_rank %>%
+  filter(rank <500,
+         rank > 10)
+
+lm(log10(`term frequency`) ~ log10(rank), data = rank_subset)
+```
+
+```{r}
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = book)) + 
+  geom_abline(intercept = -0.62, slope = -1.1, 
+              color = "gray50", linetype = 2) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+```
+### 3.3 The bind_tf_idf() function
+```{r}
+book_tf_idf <-  book_words %>% bind_tf_idf(word, book, n)
+book_tf_idf
+```
+Notice that idf and thus tf-idf are zero for these extremely common words. These are all words that appear in all six of Jane Austen’s novels, so the idf term (which will then be the natural log of 1) is zero. The inverse document frequency (and thus tf-idf) is very low (near zero) for words that occur in many of the documents in a collection; this is how this approach decreases the weight for common words. The inverse document frequency will be a higher number for words that occur in fewer of the documents in the collection.
+```{r}
+book_tf_idf %>%
+  select(-total) %>%
+  arrange(desc(tf_idf))
+```
+
+```{r fig.height=6, fig.width=6}
+book_tf_idf %>%
+  group_by(book) %>%
+  slice_max(tf_idf, n = 15) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = book))+
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~book, ncol = 2, scales = "free")+
+  labs(x = "tf-idf", y = NULL) +
+  my_pretty_theme
+
+
+```
+### 3.4 A corpus of physics texts
+```{r}
+library(gutenbergr)
+physics <- gutenberg_download(c(37729, 14725, 13476, 30155), 
+                              meta_fields = "author")
+```
+
+```{r}
+physics_words <- physics %>%
+  unnest_tokens(word, text) %>% 
+  count(author, word, sort = TRUE)
+physics_words
+```
+
+```{r}
+plot_physics <- physics_words %>%
+  bind_tf_idf(word, author, n) %>%
+  mutate(author = factor(author, levels = c("Galilei, Galileo",
+                                            "Huygens, Christiaan", 
+                                            "Tesla, Nikola",
+                                            "Einstein, Albert")))
+
+plot_physics
+```
+
+```{r fig.height=6, fig.width=6}
+plot_physics %>% group_by(author) %>%
+  slice_max(tf_idf, n = 15) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(tf_idf, word, fill = author)) +
+  geom_col(show.legemd = FALSE)+labs(x = 'tf-idf', y = NULL) +
+  facet_wrap(~author, ncol = 2, scales = "free")
+```
+
+```{r}
+mystopwords <- tibble(word = c("eq", "co", "rc", "ac", "ak", "bn", 
+                                   "fig", "file", "cg", "cb", "cm",
+                               "ab", "_k", "_k_", "_x"))
+
+
+```
+
+```{r}
+physics_words <- anti_join(physics_words, mystopwords, 
+                           by = "word")
+
+plot_physics <- physics_words %>%
+  bind_tf_idf(word, author, n) %>%
+  mutate(word = str_remove_all(word, "_")) %>%
+  group_by(author) %>% 
+  slice_max(tf_idf, n = 15) %>%
+  ungroup() %>%
+  mutate(word = fct_reorder(word, tf_idf)) %>%
+  mutate(author = factor(author, levels = c("Galilei, Galileo",
+                                            "Huygens, Christiaan",
+                                            "Tesla, Nikola",
+                                            "Einstein, Albert")))
+
+ggplot(plot_physics, aes(tf_idf, word, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~author, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL) + 
+  my_pretty_theme
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```v
