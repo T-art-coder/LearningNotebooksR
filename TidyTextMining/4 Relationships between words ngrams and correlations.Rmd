@@ -1,0 +1,214 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+install.packages("MetBrewer")
+library(MetBrewer)
+```
+
+```{r}
+devtools::install_github("gadenbuie/ggpomological")
+library(ggpomological)
+```
+
+```{r}
+library(tidyverse)
+library(janeaustenr)
+library(tidytext)
+
+#install.packages("forcats")
+library(forcats)
+```
+## theme
+```{r}
+## 
+my_pretty_theme <- theme_minimal(base_family = "Roboto Condensed", base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        # Bold, bigger title
+        plot.title = element_text(face = "bold", size = rel(1.7)),
+        # Plain, slightly bigger subtitle that is grey
+        plot.subtitle = element_text(face = "plain", size = rel(1.3), color = "grey70"),
+        # Italic, smaller, grey caption that is left-aligned
+        plot.caption = element_text(face = "italic", size = rel(0.7), 
+                                    color = "grey70", hjust = 0),
+        # Bold legend titles
+        legend.title = element_text(face = "bold"),
+        # Bold, slightly larger facet titles that are left-aligned for the sake of repetition
+        strip.text = element_text(face = "bold", size = rel(1.1), hjust = 0),
+        # Bold axis titles
+        axis.title = element_text(face = "bold"),
+        # Add some space above the x-axis title and make it left-aligned
+        axis.title.x = element_text(margin = margin(t = 10), hjust = 0),
+        # Add some space to the right of the y-axis title and make it top-aligned
+        axis.title.y = element_text(margin = margin(r = 10), hjust = 1),
+        # Add a light grey background to the facet titles, with no borders
+        strip.background = element_rect(fill = "grey90", color = NA),
+        # Add a thin grey border around all the plots to tie in the facet titles
+        panel.border = element_rect(color = "grey90", fill = NA))
+```
+
+
+# 4 Relationships between words: n-grams and correlations
+
+```{r}
+austen_bigrams  <- austen_books() %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+austen_bigrams
+```
+
+```{r}
+austen_bigrams %>% count(bigram, sort = TRUE)
+```
+## @separate function - splits a column into multiple based on a delimiter. 
+
+This lets us separate it into two columns, “word1” and “word2”, at which point we can remove cases where either is a stop-word.
+```{r}
+bigrams_filtered  <- austen_bigrams %>%
+  separate(bigram, c('word1', 'word2'), sep = " ") %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+```
+
+```{r}
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+```
+
+## @ unite function
+```{r}
+bigrams_united <- bigrams_filtered %>% 
+  unite(bigram, word1, word2, sep = " ")
+
+bigrams_united
+```
+## use bind_tf_idf for bigrams
+```{r}
+bigram_tf_idf <- bigrams_united %>%
+  count(book, bigram) %>%
+  bind_tf_idf(bigram, book, n) %>%
+  arrange(desc(tf_idf))
+
+bigram_tf_idf
+``` 
+
+```{r}
+extrafont::font_import("Homemade Apple")
+```
+
+
+```{r fig.height=8}
+bigram_tf_idf %>%
+  group_by(book)%>%
+  slice_max(tf_idf, n = 10) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(bigram,tf_idf) , fill = book))+
+  geom_col(show.legend = FALSE)+
+  facet_wrap(~book, ncol = 2, scales = "free")+
+  theme_pomological("Homemade Apple", 16)+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+  
+```
+## 4.1.3 Using bigrams to provide context in sentiment analysis
+```{r}
+bigrams_separated <- austen_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+
+bigrams_separated %>%
+  filter(word1 == "not") %>%
+  count(word1, word2, sort = TRUE)
+```
+
+
+```{r}
+AFINN <- get_sentiments("afinn")
+
+AFINN
+```
+
+
+```{r}
+not_words <- bigrams_separated  %>%
+  filter(word1 == "not") %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>% 
+  count(word2, value, sort = TRUE)
+
+not_words
+```
+
+```{r}
+not_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(20) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"not\"")+
+  theme_bw()+
+  scale_fill_manual(values=met.brewer("Greek", 2))
+```
+
+
+```{r}
+negation_words <- c("not", "no", "never", "without")
+
+negated_words <- bigrams_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+```
+
+## 4.1.4 Visualizing a network of bigrams with ggraph
+
+```{r}
+install.packages("igraph")
+install.packages("ggraph")
+
+library(igraph)
+library(ggraph)
+```
+
+```{r}
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+```
+
+
+```{r}
+bigram_graph <- bigram_counts  %>%
+  filter(n>20) %>%
+  graph_from_data_frame()
+```
+Continue: https://www.tidytextmining.com/ngrams.html#using-bigrams-to-provide-context-in-sentiment-analysis
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
