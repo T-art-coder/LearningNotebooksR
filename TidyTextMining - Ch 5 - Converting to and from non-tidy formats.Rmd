@@ -1,0 +1,429 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+One of the most common structures that text mining packages work with is the document-term matrix (or DTM). This is a matrix where:
+
+-- each row represents one document (such as a book or article),
+-- each column represents one term, and
+-- each value (typically) contains the number of appearances of that term in that document.
+```{r}
+# install.packages("tm")
+#install.packages("topicmodels")
+library(tm)
+library(tidyverse)
+library(tidytext)
+library(MetBrewer)
+```
+
+DTM objects cannot be used directly with tidy tools, just as tidy data frames cannot be used as input for most text mining packages. Thus, the tidytext package provides two verbs that convert between the two formats.
+
+-- tidy() turns a document-term matrix into a tidy data frame. This verb comes from the broom package (Robinson 2017), which provides similar tidying functions for many statistical models and objects.
+-- cast() turns a tidy one-term-per-row data frame into a matrix. tidytext provides three variations of this verb, each converting to a different type of matrix: 
+    cast_sparse() (converting to a sparse matrix from the Matrix package), 
+    cast_dtm() (converting to a DocumentTermMatrix object from tm), and 
+    cast_dfm() (converting to a dfm object from quanteda).
+
+### 5.1.1 Tidying DocumentTermMatrix objects
+```{r}
+data("AssociatedPress", package = "topicmodels")
+AssociatedPress
+```
+99% sparsity or 99% of cells are zero
+```{r}
+terms <- Terms(AssociatedPress)
+head(terms)
+```
+```{r}
+ap_td <- tidy(AssociatedPress)
+ap_td
+```
+
+```{r}
+library(ggthemes)
+library(extrafont)
+library(plyr)
+library(scales)
+```
+
+```{r}
+font_import(paths = "~/.fonts", pattern="Humor Sans")
+font_import(pattern="[X/x]kcd")
+fonts()
+```
+```{r}
+font_import()
+loadfonts()
+```
+
+```{r}
+library(extrafont)
+
+download.file("http://simonsoftware.se/other/xkcd.ttf",
+              dest="xkcd.ttf", mode="wb")
+system("mkdir ~/.fonts")
+system("cp xkcd.ttf  ~/.fonts")
+font_import(paths = "~/.fonts", pattern="[X/x]kcd")
+fonts()
+loadfonts()
+
+font_import(pattern="[X/x]kcd")
+fonts()
+```
+```{r}
+library(showtext)
+## Loading Google fonts (https://fonts.google.com/)
+font_add_google("Gochi Hand", "gochi")
+font_add_google("Schoolbell", "bell")
+```
+
+
+```{r}
+ap_td %>% inner_join(get_sentiments("bing"), by = c(term = "word")) %>%
+  count(sentiment, term, wt = count) %>%
+  ungroup() %>%
+  filter(n >= 200) %>%
+  mutate(n = ifelse(sentiment == "negative", -n, n)) %>%
+  mutate(term = reorder(term, n)) %>%
+    ggplot(aes(n, term, fill = sentiment)) +
+    geom_col() +
+    labs(x = "Contribution to sentiment", y = NULL)+
+  theme_bw()+
+  scale_fill_manual(values=met.brewer("Greek", 2))+
+  theme(text=element_text(family="gochi"),
+        axis.title.x = element_text(family="gochi"),
+        axis.text = element_text(family="gochi"))
+
+
+```
+5.1.2 Tidying dfm objects
+
+Other text mining packages provide alternative implementations of document-term matrices, such as the dfm (document-feature matrix) class from the quanteda package (Benoit and Nulty 2016). For example, the quanteda package comes with a corpus of presidential inauguration speeches, which can be converted to a dfm using the appropriate functions.
+```{r}
+data("data_corpus_inaugural", package = "quanteda")
+inaug_dfm <- data_corpus_inaugural %>%
+  quanteda::tokens() %>%
+  quanteda::dfm(verbose = FALSE)
+inaug_dfm
+```
+
+```{r}
+inaug_td <- tidy(inaug_dfm)
+inaug_td
+```
+
+```{r}
+inaug_td_idf <-inaug_td %>%
+  bind_tf_idf(term, document, count) %>%
+  arrange(desc(tf_idf))
+
+head(inaug_td_idf)
+```
+
+```{r}
+speeches <- c("1933-Roosevelt", "1861-Lincoln",
+              "1961-Kennedy", "2009-Obama")
+
+library(ggthemes)
+```
+
+
+
+```{r}
+inaug_td_idf %>%
+  filter(document %in% speeches) %>%
+  group_by(document) %>%
+  slice_max(tf_idf, n = 10, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(term = reorder_within(term, tf_idf, document)) %>%
+  ggplot(aes(term, tf_idf, fill = document)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ document, scales = "free")+
+  coord_flip()+
+  scale_x_reordered()+ 
+  #needs reorder within
+  labs(x = NULL, y = "tf-idf")+
+  #theme_minimal()+
+  scale_fill_manual(values=met.brewer("Greek")) +
+  theme_fivethirtyeight()
+```
+As another example of a visualization possible with tidy data, we could extract the year from each document’s name, and compute the total number of words within each year.
+```{r}
+year_term_counts  <- inaug_td %>%
+  extract(document, "year", "(\\d+)", convert = TRUE) %>%
+  complete(year, term, fill = list(count = 0)) %>%
+  group_by(year) %>%
+  mutate(year_total = sum(count))
+year_term_counts 
+```
+
+
+```{r}
+year_term_counts %>%
+  filter(term %in% c("god", "america", "foreign", "union", "constitution", "freedom")) %>%
+  ggplot(aes(year, count / year_total)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~ term, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(y = "% frequency of word in inaugural address")+
+  theme_classic()
+```
+
+# 5.2 Casting tidy text data into a matrix
+
+Therefore, tidytext provides cast_ verbs for converting from a tidy form to these matrices.
+```{r}
+ap_td %>%
+  cast_dtm(document, term, count)
+```
+## 5.3.1 Example: mining financial articles
+```{r}
+install.packages("tm.plugin.webmining")
+install.packages("purr")
+
+library(purrr)
+
+company <- c("Microsoft", "Apple", "Google", "Amazon", "Facebook",
+             "Twitter", "IBM", "Yahoo", "Netflix")
+symbol  <- c("MSFT", "AAPL", "GOOG", "AMZN", "FB", 
+             "TWTR", "IBM", "YHOO", "NFLX")
+
+download_articles <- function(symbol) {
+  WebCorpus(GoogleFinanceSource(paste0("NASDAQ:", symbol)))
+}
+
+stock_articles <- tibble(company = company,
+                         symbol = symbol) %>%
+  mutate(corpus = map(symbol, download_articles))
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+v
